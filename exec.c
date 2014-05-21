@@ -169,6 +169,9 @@ static enum op_stats can_x_lock(char *var, int trans) {
 }
 
 static enum op_stats can_write(char *var, int trans) {
+	GSList *t;
+	struct operation *op;
+
 	// Checando se a variável já foi bloqueada exclusivamente pela transição.
 	t = g_hash_table_lookup(lock_x_table, var);
 	if (t != NULL) {
@@ -183,6 +186,9 @@ static enum op_stats can_write(char *var, int trans) {
 }
 
 static enum op_stats can_read(char *var, int trans) {
+	GSList *t;
+	struct operation *op;
+
 	if (can_write(var, trans) == OP_OK)
 		return OP_OK;
 
@@ -320,39 +326,33 @@ static enum op_stats operation_status(struct operation *op) {
 	return OP_OK;
 }
 
-static check_waiting_operation() {
+void exec_operations(GSList *op_list) {
+	struct operation *op;
+	enum op_stats stats;
+
+	if (op_list == NULL)
+		return;
+
+	lock_s_table = g_hash_table_new(g_str_hash, g_str_equal);
+	lock_x_table = g_hash_table_new(g_str_hash, g_str_equal);
+	wait_table = g_hash_table_new(g_str_hash, g_str_equal);
+
 	for (int i = 0; i < g_slist_length(op_list); i++) {
 		op = g_slist_nth_data(op_list, i);
-
-	}
-
-	void exec_operations(GSList *op_list) {
-		struct operation *op;
-		enum op_stats stats;
-
-		if (op_list == NULL)
-			return;
-
-		lock_s_table = g_hash_table_new(g_str_hash, g_str_equal);
-		lock_x_table = g_hash_table_new(g_str_hash, g_str_equal);
-		wait_table = g_hash_table_new(g_str_hash, g_str_equal);
-
-		for (int i = 0; i < g_slist_length(op_list); i++) {
-			op = g_slist_nth_data(op_list, i);
-			stats = operation_status(op);
-			if ((stats == OP_WAIT) || (is_transaction_waiting(op)))
-				add_transaction_to_wait(op);
-			else if (stats != OP_OK) {
-				printf("ERROR:\n");
-				dump_operation(op);
-			}
+		stats = operation_status(op);
+		if ((stats == OP_WAIT) || (is_transaction_waiting(op)))
+			add_transaction_to_wait(op);
+		else if (stats != OP_OK) {
+			printf("ERROR:\n");
+			dump_operation(op);
 		}
-
-		dump_lock_s_table();
-		dump_lock_x_table();
-		dump_wait_table();
-
-		g_hash_table_destroy(lock_s_table);
-		g_hash_table_destroy(lock_x_table);
-		g_hash_table_destroy(wait_table);
 	}
+
+	dump_lock_s_table();
+	dump_lock_x_table();
+	dump_wait_table();
+
+	g_hash_table_destroy(lock_s_table);
+	g_hash_table_destroy(lock_x_table);
+	g_hash_table_destroy(wait_table);
+}
