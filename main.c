@@ -5,27 +5,49 @@
 
 #include "structs.h"
 #include "parser.h"
+#include "exec.h"
 
-
-void dump_operation(struct operation *op) {
+void operation_clean(struct operation *op) {
 	if (op == NULL)
 		return;
 
-	printf("[%d] [%s] [%s]\n", op->transaction, cmd_to_strcmd(op->cmd), op->var);
+	if (op->var != NULL)
+		g_free(op->var);
+
+	g_free(op);
+}
+
+void operations_cleanup(GSList *op_list) {
+	if (op_list == NULL)
+		return;
+
+	g_slist_free_full(op_list, (GDestroyNotify)operation_clean);
+	op_list = NULL;
 }
 
 int main(int argc, char **argv) {
+	GSList *op_list;
+
 	op_list = NULL;
-	block_list = NULL;
 
 	if (argc < 2) {
 		printf("ERROR!\n");
 		return 0;
 	}
 
-	printf("Executing \"%s\"\n", argv[1]);
-	parse_operations(argv[1]);
+	printf("Parsing \"%s\"\n", argv[1]);
+	op_list = parse_operations(argv[1]);
+	if (op_list == NULL) {
+		printf("Error parsing file.\n");
+		return 0;
+	}
 
-	printf("op length = %d\n", g_slist_length(op_list));
+	printf("%d operations found\n", g_slist_length(op_list));
 	g_slist_foreach(op_list, (GFunc)dump_operation, NULL);
+
+	printf("Executing \"%s\"\n", argv[1]);
+	exec_operations(op_list);
+
+	printf("Cleaning \"%s\"\n", argv[1]);
+	operations_cleanup(op_list);
 }

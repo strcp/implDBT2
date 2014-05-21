@@ -5,7 +5,6 @@
 
 enum command strcmd_to_cmd(char *cmd);
 char *cmd_to_strcmd(enum command cmd);
-void parse_command(char *command);
-void parse_operations(char *filename);
+GSList *parse_operations(char *filename);
 
 #endif

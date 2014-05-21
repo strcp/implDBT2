@@ -5,6 +5,8 @@
 
 #include "structs.h"
 
+GSList *op_list;
+
 enum command strcmd_to_cmd(char *cmd)
 {
 	if (cmd == NULL)
@@ -45,7 +47,7 @@ char *cmd_to_strcmd(enum command cmd)
 	return "UNKNOWN";
 }
 
-void parse_command(char *command) {
+static void parse_command(char *command) {
 	char *trs, *cmd, *val;
 	long size;
 	struct operation *op;
@@ -76,7 +78,7 @@ void parse_command(char *command) {
 		free(val);
 }
 
-void parse_operations(char *filename) {
+GSList *parse_operations(char *filename) {
 	FILE *fp;
 	char *tok, *file_buffer;
 	long size;
@@ -84,13 +86,13 @@ void parse_operations(char *filename) {
 	int n = 0;
 
 	if (filename == NULL)
-		return;
+		return NULL;
 
 	fp = fopen(filename,"r");
 
 	if (!fp) {
 		perror("fopen");
-		return;
+		return NULL;
 	}
 
 	fseek(fp, 0L, SEEK_END);
@@ -129,4 +131,6 @@ void parse_operations(char *filename) {
 
 	if (cmd_list != NULL)
 		free(cmd_list);
+
+	return op_list;
 }

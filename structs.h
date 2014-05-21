@@ -20,7 +20,5 @@ struct operation
 	char *var;
 };
 
-GSList *op_list;
-GSList *block_list;
 
 #endif
