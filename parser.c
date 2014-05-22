@@ -68,14 +68,16 @@ static void parse_command(char *command) {
 	op->transaction = atoi(trs);
 	op->cmd = strcmd_to_cmd(cmd);
 	op->var = strdup(val);
-	op_list = g_slist_append(op_list, op);
+
+	if (op->cmd != CMD_UNKNOWN)
+		op_list = g_slist_append(op_list, op);
 
 	if (trs)
-		free(trs);
+		g_free(trs);
 	if (cmd)
-		free(cmd);
+		g_free(cmd);
 	if (val)
-		free(val);
+		g_free(val);
 }
 
 GSList *parse_operations(char *filename) {
