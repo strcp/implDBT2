@@ -63,7 +63,6 @@ static void parse_command(char *command) {
 	bzero(cmd, size);
 	bzero(val, size);
 
-	printf("DBG: %s\n", command);
 	sscanf(command, "%[^':']:%[^':']:%s", trs, cmd, val);
 	op = malloc(sizeof(struct operation));
 	op->transaction = atoi(trs);
@@ -82,58 +81,33 @@ static void parse_command(char *command) {
 }
 
 GSList *parse_operations(char *filename) {
-	FILE *fp;
 	char *tok, *file_buffer;
-	long size;
-	char **cmd_list;
-	int n = 0;
+	GSList *cmd_list = NULL;
 
 	if (filename == NULL)
 		return NULL;
 
-	fp = fopen(filename,"r");
-
-	if (!fp) {
-		perror("fopen");
+	if (g_file_get_contents(filename, &file_buffer, NULL, NULL) == FALSE) {
+		printf("Error reading file.\n");
 		return NULL;
 	}
 
-	fseek(fp, 0L, SEEK_END);
-	size = ftell(fp);
-	fseek(fp, 0L, SEEK_SET);
-
-	file_buffer = malloc(size * sizeof(char));
-	fread(file_buffer, size, 1, fp);
-	fclose(fp);
-
-	cmd_list = NULL;
 	tok = strtok(file_buffer, "\n");
 	while (tok != NULL) {
-		n++;
-		if (cmd_list == NULL)
-			cmd_list = malloc(n * sizeof(char *));
-		else
-			cmd_list = realloc(cmd_list, n * sizeof(char *));
-
-		cmd_list[n - 1] = strdup(tok);
+		cmd_list = g_slist_append(cmd_list, g_strdup(tok));
 		tok = strtok(NULL, "\n");
 	}
 
-	for (int i = 0; i < n; i++) {
-		parse_command(cmd_list[i]);
+	for (int i = 0; i < g_slist_length(cmd_list); i++) {
+		char *tmp = g_slist_nth_data(cmd_list, i);
+		parse_command(tmp);
 	}
 
 	if (file_buffer)
-		free(file_buffer);
+		g_free(file_buffer);
 
 
-	for (int i = 0; i < n; i++) {
-		if (cmd_list[i] != NULL)
-			free(cmd_list[i]);
-	}
-
-	if (cmd_list != NULL)
-		free(cmd_list);
+	g_slist_free(cmd_list);
 
 	return op_list;
 }
