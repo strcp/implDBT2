@@ -22,8 +22,10 @@ enum op_stats
 };
 
 
-GSList *unlocked_transaction_list;
-GSList *aborted_transaction_list;
+GSList *unlocked_transaction_list = NULL;
+GSList *aborted_transaction_list = NULL;
+GSList *lock_waiting_list = NULL;
+
 GHashTable *wait_table;
 GHashTable *lock_s_table;
 GHashTable *lock_x_table;
@@ -40,7 +42,8 @@ void dump_operation(struct operation *op) {
 	printf("[%d] [%s] [%s]\n", op->transaction, cmd_to_strcmd(op->cmd), op->var);
 }
 
-static void dump_unlocked(gpointer data, gpointer userdata)
+#ifdef DEBUG
+static void dump_list(gpointer data, gpointer userdata)
 {
 	char *strtrans;
 
@@ -57,7 +60,7 @@ static void dump_unlocked_list()
 		return;
 
 	printf("UNLOCKED LIST:\n");
-	g_slist_foreach(unlocked_transaction_list, dump_unlocked, NULL);
+	g_slist_foreach(unlocked_transaction_list, dump_list, NULL);
 }
 
 static void dump_aborted_list()
@@ -66,7 +69,7 @@ static void dump_aborted_list()
 		return;
 
 	printf("ABORTED LIST:\n");
-	g_slist_foreach(aborted_transaction_list, dump_unlocked, NULL);
+	g_slist_foreach(aborted_transaction_list, dump_list, NULL);
 }
 
 
@@ -126,8 +129,23 @@ static void dump_wait_table() {
 	g_hash_table_foreach(wait_table, dump_table_list, "wait_table");
 	printf("\n");
 }
+#endif
 
-int check_deadlocks() {
+static void check_deadlocks() {
+	if (lock_waiting_list == NULL)
+		return;
+
+	for (int i = 0; i < g_slist_length(lock_waiting_list); i++) {
+		struct operation *op = g_slist_nth_data(lock_waiting_list, i);
+		char *strtrans = g_strdup_printf("%d", op->transaction);
+		GSList *op_list = g_hash_table_lookup(wait_table, strtrans);
+
+#ifdef DEBUG
+		printf("DLOCK TABLE:\n");
+		g_slist_foreach(op_list, dump_list, NULL);
+		printf("\n");
+#endif
+	}
 }
 
 static int is_transaction_waiting(struct operation *op) {
@@ -142,9 +160,7 @@ static int is_transaction_waiting(struct operation *op) {
 	if (op_list != NULL) {
 		for (int i = 0; i < g_slist_length(op_list); i++) {
 			tmp_op = g_slist_nth_data(op_list, i);
-			//printf("DBG: ");
-			//dump_operation(tmp_op);
-			if (((tmp_op->cmd == CMD_LOCK_S) || (tmp_op->cmd == CMD_LOCK_X)) && (g_strcmp0(op->var, tmp_op->var) == 0))
+			if (((tmp_op->cmd == CMD_LOCK_S) || (tmp_op->cmd == CMD_LOCK_X)))
 				return 1;
 		}
 	}
@@ -160,10 +176,18 @@ static void add_transaction_to_wait(struct operation *op) {
 	if (strtrans == NULL)
 		return;
 
-	//dump_operation(op);
+#ifdef DEBUG
+	printf("ADDING TO WAIT: ");
+	dump_operation(op);
+#endif
+
 	GSList *op_list = g_hash_table_lookup(wait_table, strtrans);
 	op_list = g_slist_append(op_list, op);
 	g_hash_table_insert(wait_table, strtrans, op_list);
+
+	// Para ser checado depois pelo analisador de deadlocks.
+	if ((op->cmd == CMD_LOCK_X) || (op->cmd == CMD_LOCK_S))
+		lock_waiting_list = g_slist_append(lock_waiting_list, op);
 }
 
 static void remove_transaction_from_wait(struct operation *op) {
@@ -185,6 +209,8 @@ static void remove_transaction_from_wait(struct operation *op) {
 		g_hash_table_destroy(wait_table);
 		wait_table = NULL;
 	}*/
+
+	lock_waiting_list = g_slist_remove(lock_waiting_list, op);
 }
 
 int did_unlocked(struct operation *op) {
@@ -307,7 +333,9 @@ static void abort_transaction(struct operation *op) {
 	if (op_list != NULL) {
 		g_hash_table_remove(wait_table, strtrans);
 		g_slist_free(op_list);
+#ifdef DEBUG
 		dump_wait_table();
+#endif
 	}
 }
 
@@ -342,7 +370,6 @@ static enum op_stats can_x_lock(struct operation *op) {
 			if (tmp_op->transaction == op->transaction)
 				continue;
 			else
-				// FIXME
 				return OP_WAIT;
 		}
 	}
@@ -364,7 +391,7 @@ static enum op_stats can_x_lock(struct operation *op) {
 }
 
 static enum op_stats can_write(struct operation *op) {
-	GSList *t;
+	GSList *t = NULL;
 	struct operation *tmpop;
 	char *var;
 	int trans;
@@ -393,7 +420,7 @@ static enum op_stats can_write(struct operation *op) {
 }
 
 static enum op_stats can_read(struct operation *op) {
-	GSList *t;
+	GSList *t = NULL;
 	struct operation *tmpop;
 	enum op_stats stats;
 	char *var;
@@ -498,7 +525,7 @@ static void cleanup_list_waiting_list(gpointer key, gpointer value, gpointer use
 }
 
 static void cleanup_waiting_operations() {
-	GSList *clean_list;
+	GSList *clean_list = NULL;
 	char *key;
 
 	if (wait_table == NULL)
@@ -580,13 +607,19 @@ void exec_operations(GSList *op_list) {
 			}
 			i++;
 		}
+		check_deadlocks();
+#ifdef DEBUG
+		dump_wait_table();
+#endif
 	}
 
+#ifdef DEBUG
 	dump_lock_s_table();
 	dump_lock_x_table();
 	dump_wait_table();
 	dump_unlocked_list();
 	dump_aborted_list();
+#endif
 
 	if ((g_hash_table_size(lock_x_table) > 0) ||
 			(g_hash_table_size(lock_s_table) > 0) ||
