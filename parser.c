@@ -63,6 +63,7 @@ static void parse_command(char *command) {
 	bzero(cmd, size);
 	bzero(val, size);
 
+	printf("DBG: %s\n", command);
 	sscanf(command, "%[^':']:%[^':']:%s", trs, cmd, val);
 	op = malloc(sizeof(struct operation));
 	op->transaction = atoi(trs);
