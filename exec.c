@@ -197,8 +197,9 @@ static void check_deadlocks() {
 				continue;
 
 			if (is_locking(key1, key2) && is_locking(key2, key1)) {
-				printf("DEADLOCK!\n");
+				printf("* DEADLOCK DETECTED *\n");
 
+				// Selecionando pela operação mais velha
 				sk1 = g_strdup_printf("%d", key1);
 				GSList *op_list = g_hash_table_lookup(wait_table, sk1);
 				g_free(sk1);
@@ -396,7 +397,7 @@ static void abort_transaction(struct operation *op) {
 
 	strtrans = g_strdup_printf("%d", op->transaction);
 	aborted_transaction_list = g_slist_append(aborted_transaction_list, strtrans);
-	printf("ABORTING TRANSACTION: %s\n", strtrans);
+	printf("* ABORTING TRANSACTION: %s *\n", strtrans);
 
 	// Removendo das tabelas de lock_s
 	keys = g_hash_table_get_keys(lock_s_table);
@@ -404,7 +405,7 @@ static void abort_transaction(struct operation *op) {
 		char *key = g_list_nth_data(keys, i);
 		op_list = g_hash_table_lookup(lock_s_table, key);
 		for (int j = 0; j < g_slist_length(op_list); j++) {
-			struct operation *tmp_op = g_slist_nth_data(op_list, i);
+			struct operation *tmp_op = g_slist_nth_data(op_list, j);
 			if (op->transaction == tmp_op->transaction)
 				op_list = g_slist_remove(op_list, tmp_op);
 		}
@@ -423,7 +424,7 @@ static void abort_transaction(struct operation *op) {
 		char *key = g_list_nth_data(keys, i);
 		op_list = g_hash_table_lookup(lock_x_table, key);
 		for (int j = 0; j < g_slist_length(op_list); j++) {
-			struct operation *tmp_op = g_slist_nth_data(op_list, i);
+			struct operation *tmp_op = g_slist_nth_data(op_list, j);
 			if (op->transaction == tmp_op->transaction)
 				op_list = g_slist_remove(op_list, tmp_op);
 		}
