@@ -30,6 +30,7 @@ GHashTable *wait_table;
 GHashTable *lock_s_table;
 GHashTable *lock_x_table;
 
+static void abort_transaction(struct operation *op);
 
 int compare_trans(gconstpointer a, gconstpointer b) {
 	return g_strcmp0(a, b);
@@ -131,20 +132,88 @@ static void dump_wait_table() {
 }
 #endif
 
+// Checa se t1 trava t2
+static int is_locking(int t1, int t2) {
+	char *strt1 = g_strdup_printf("%d", t1);
+
+	GSList *op_list = g_hash_table_lookup(wait_table, strt1);
+	g_free(strt1);
+
+	if (g_slist_length(op_list) == 0)
+		return 0;
+
+	struct operation *op = g_slist_nth_data(op_list, 0);
+	if (op == NULL)
+		return 0;
+
+	GSList *xlock_list = g_hash_table_lookup(lock_x_table, op->var);
+	if (xlock_list != NULL) {
+		for (int j = 0; j < g_slist_length(xlock_list); j++) {
+			struct operation *tmp_op = g_slist_nth_data(xlock_list, j);
+			if (t2 == tmp_op->transaction) {
+				return 1;
+			}
+		}
+	}
+
+	// Apenas um X_LOCK pode ser bloqueado por um S_LOCK
+	if (op->cmd == CMD_LOCK_X) {
+		GSList *slock_list = g_hash_table_lookup(lock_s_table, op->var);
+		if (slock_list != NULL) {
+			for (int j = 0; j < g_slist_length(slock_list); j++) {
+				struct operation *tmp_op = g_slist_nth_data(slock_list, j);
+				if (t2 == tmp_op->transaction) {
+					return 1;
+				}
+			}
+		}
+	}
+
+	return 0;
+}
+
 static void check_deadlocks() {
+	int key1, key2;
+	char *sk1, *sk2;
+
 	if (lock_waiting_list == NULL)
 		return;
 
-	for (int i = 0; i < g_slist_length(lock_waiting_list); i++) {
-		struct operation *op = g_slist_nth_data(lock_waiting_list, i);
-		char *strtrans = g_strdup_printf("%d", op->transaction);
-		GSList *op_list = g_hash_table_lookup(wait_table, strtrans);
+	GList *trans_waiting = g_hash_table_get_keys(wait_table);
 
-#ifdef DEBUG
-		printf("DLOCK TABLE:\n");
-		g_slist_foreach(op_list, dump_list, NULL);
-		printf("\n");
-#endif
+	for (int i = 0; i < g_list_length(trans_waiting); i++) {
+		sk1 = g_list_nth_data(trans_waiting, i);
+		if (sk1 == NULL)
+			continue;
+
+		for (int j = 0; j < g_list_length(trans_waiting); j++) {
+			sk2 = g_list_nth_data(trans_waiting, j);
+			if (sk2 == NULL)
+				continue;
+
+			key1 = atoi(sk1);
+			key2 = atoi(sk2);
+			if (key1 == key2)
+				continue;
+
+			if (is_locking(key1, key2) && is_locking(key2, key1)) {
+				printf("DEADLOCK!\n");
+
+				sk1 = g_strdup_printf("%d", key1);
+				GSList *op_list = g_hash_table_lookup(wait_table, sk1);
+				g_free(sk1);
+
+				if (g_slist_length(op_list) == 0)
+					continue;
+
+				struct operation *op = g_slist_nth_data(op_list, 0);
+				if (op == NULL)
+					continue;
+
+				abort_transaction(op);
+				return;
+			}
+		}
 	}
 }
 
@@ -230,7 +299,7 @@ int did_unlocked(struct operation *op) {
 	return 0;
 }
 
-static enum op_stats unlock_variable(struct operation *op) {
+static enum op_stats unlock_variable(struct operation *op, int force) {
 	GSList *t = NULL;
 	struct operation *tmp_op;
 	enum op_stats stats;
@@ -239,7 +308,7 @@ static enum op_stats unlock_variable(struct operation *op) {
 	if (op == NULL)
 		return OP_ERROR;
 
-	if (is_transaction_waiting(op))
+	if (is_transaction_waiting(op) && !force)
 		return OP_WAIT;
 
 	stats = OP_ERROR;
@@ -322,14 +391,54 @@ static int did_aborted(struct operation *op) {
 
 static void abort_transaction(struct operation *op) {
 	char *strtrans;
+	GList *keys = NULL;
+	GSList *op_list = NULL;
 
 	strtrans = g_strdup_printf("%d", op->transaction);
 	aborted_transaction_list = g_slist_append(aborted_transaction_list, strtrans);
 	printf("ABORTING TRANSACTION: %s\n", strtrans);
 
-	GSList *op_list = g_hash_table_lookup(wait_table, strtrans);
+	// Removendo das tabelas de lock_s
+	keys = g_hash_table_get_keys(lock_s_table);
+	for (int i = 0; i < g_list_length(keys); i++) {
+		char *key = g_list_nth_data(keys, i);
+		op_list = g_hash_table_lookup(lock_s_table, key);
+		for (int j = 0; j < g_slist_length(op_list); j++) {
+			struct operation *tmp_op = g_slist_nth_data(op_list, i);
+			if (op->transaction == tmp_op->transaction)
+				op_list = g_slist_remove(op_list, tmp_op);
+		}
+		if (g_slist_length(op_list) == 0) {
+			g_hash_table_remove(lock_s_table, key);
+			g_slist_free(op_list);
+		}
+		else {
+			g_hash_table_insert(lock_s_table, key, op_list);
+		}
+	}
 
-	unlock_variable(op);
+	// Removendo das tabelas de lock_x
+	keys = g_hash_table_get_keys(lock_x_table);
+	for (int i = 0; i < g_list_length(keys); i++) {
+		char *key = g_list_nth_data(keys, i);
+		op_list = g_hash_table_lookup(lock_x_table, key);
+		for (int j = 0; j < g_slist_length(op_list); j++) {
+			struct operation *tmp_op = g_slist_nth_data(op_list, i);
+			if (op->transaction == tmp_op->transaction)
+				op_list = g_slist_remove(op_list, tmp_op);
+		}
+		if (g_slist_length(op_list) == 0) {
+			g_hash_table_remove(lock_x_table, key);
+			g_slist_free(op_list);
+		}
+		else {
+			g_hash_table_insert(lock_x_table, key, op_list);
+		}
+	}
+
+
+	op_list = g_hash_table_lookup(wait_table, strtrans);
+	unlock_variable(op, 1);
 	if (op_list != NULL) {
 		g_hash_table_remove(wait_table, strtrans);
 		g_slist_free(op_list);
@@ -504,7 +613,7 @@ static enum op_stats operation_status(struct operation *op) {
 				x_lock(op);
 			return stats;
 		case CMD_UNLOCK:
-			return unlock_variable(op);
+			return unlock_variable(op, 0);
 		case CMD_UNKNOWN:
 		default:
 			break;
@@ -610,6 +719,8 @@ void exec_operations(GSList *op_list) {
 		check_deadlocks();
 #ifdef DEBUG
 		dump_wait_table();
+		dump_lock_x_table();
+		dump_lock_s_table();
 #endif
 	}
 
